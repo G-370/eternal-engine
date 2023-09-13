@@ -1,0 +1,10 @@
+[Unit]
+Description=The Eternal Engine
+
+[Service]
+ExecStart=/media/tetra/Labsys/asperg/log-balls/run.sh
+User=tetra
+WorkingDirectory=/media/tetra/Labsys/asperg/log-balls
+
+[Install]
+WantedBy=multi-user.target

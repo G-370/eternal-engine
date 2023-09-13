@@ -1,0 +1,10 @@
+[Unit]
+Description=${V_DESC}
+
+[Service]
+ExecStart=${V_EXEC}
+User=${V_USER}
+WorkingDirectory=${V_DIR}
+
+[Install]
+WantedBy=multi-user.target
