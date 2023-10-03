@@ -1,12 +1,20 @@
 import discord
 import discord.abc
+import re
 import aiohttp
 import asyncio
 import requests
 
+USER_MENTION_PATTERN = re.compile('(\<@(\d*)\>)')
+SAMPLE = "<@1158144160923140108>"
+
 class Thread:
     def __init__(self, thread_id) -> None:
         self.id = thread_id
+        
+def depingify(matched: re.Match):
+    striped: str = matched.string[2:-1]
+    return f'`ping {striped}`'
 
 async def send_message(msg: discord.Message, target_webhook, thread_id = None):
     async with aiohttp.ClientSession() as session:
@@ -19,32 +27,17 @@ async def send_message(msg: discord.Message, target_webhook, thread_id = None):
 
         for emb in embeds:
             mediabeds += f"\n{emb.url}"
-
-        # for ath in attachments:
-        #     emby = discord.Embed(url=ath, description=ath, title='Media')
-        #     embeds.append(emby)
-        #     mediabeds += f"\n{ath}"
+            
+        raw_content = (msg.content or '[media]') + mediabeds
+        
+        pingless_content = re.sub(USER_MENTION_PATTERN, depingify, raw_content)
 
         payload = {
-            'content': (msg.content or '[media]') + mediabeds,
+            'content': pingless_content,
             'avatar_url': avatar_url,
             'embeds': embeds,
             'username':  f'{msg.author.name} @{msg.author.id}'
         }
-
-        # print(f'ORIGINALRU GOES BRRRRR', {
-        #     'author': '\n'.join([
-        #         msg.author.guild_avatar and msg.author.guild_avatar.url or '',
-        #         msg.author.default_avatar and msg.author.default_avatar.url or '',
-        #         msg.author.display_avatar and msg.author.display_avatar.url or ''
-        #     ] or ['']),
-        #     'embeds': '\n'.join([
-        #         embed.url or '' for embed in msg.embeds
-        #     ] or ['']),
-        #     'attachments': '\n'.join([
-        #         ath.url or '' for ath in msg.attachments
-        #     ] or [''])
-        # })
 
         if (thread_id):
             thread = Thread(thread_id)
