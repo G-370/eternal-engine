@@ -1,9 +1,14 @@
 import discord
+import discord.abc
 import aiohttp
 import asyncio
 import requests
 
-async def send_message(msg: discord.Message, target_webhook):
+class Thread:
+    def __init__(self, thread_id) -> None:
+        self.id = thread_id
+
+async def send_message(msg: discord.Message, target_webhook, thread_id = None):
     async with aiohttp.ClientSession() as session:
         hook = discord.Webhook.from_url(target_webhook, session=session)
         avatar_url = msg.author.display_avatar.url
@@ -41,5 +46,9 @@ async def send_message(msg: discord.Message, target_webhook):
         #     ] or [''])
         # })
 
-        print(payload)
-        await hook.send(**payload, files=files)
+        if (thread_id):
+            thread = Thread(thread_id)
+            res = await hook.send(**payload, files=files, thread=thread)
+            pass
+        else:
+            await hook.send(**payload, files=files)
