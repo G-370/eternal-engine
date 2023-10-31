@@ -1,11 +1,27 @@
-from typing import Any
+from typing import Any, Coroutine
 import discord
+import discord.gateway
 import pymongo
 import requests
 import re
 import datetime
 import webhook
 import time
+import logging
+import error_control
+import memory_management
+import tracemalloc
+
+import traceback
+from gc import get_objects
+from discord.backoff import ExponentialBackoff
+from discord.errors import ConnectionClosed,HTTPException,GatewayNotFound
+from discord.gateway import ReconnectWebSocket
+from typing import Dict
+import asyncio
+import aiohttp
+
+tracemalloc.start()
 
 db = pymongo.MongoClient(host='autosystem', port=27027)
 
@@ -21,32 +37,35 @@ class CHANNEL_TYPES:
     GUILD_CATEGORY = 4
     GUILD_FORUM = 15
 
+def dsdEE():
+    return db['dsd-eternal-engine']
+
 def slugify(txt: str):
     #regex = re.compile(r"(?![a-zA-Z]).", re.M)
     return re.sub(r"((?![a-zA-Z]).)+", "-", txt.lower())
 
 def setup_data_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     return eternal_engine_database.setup_data
 
 def guilds_cache_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     return eternal_engine_database.cached_guilds
 
 def guild_forums_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     return eternal_engine_database.guild_forums
 
 def guild_forum_threads_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     return eternal_engine_database.guild_forum_threads
 
 def guild_forum_webhooks_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     return eternal_engine_database.guild_forum_webhooks
 
 def resource_locks_collection():
-    eternal_engine_database = db['dsd-eternal-engine']
+    eternal_engine_database = dsdEE()
     resource_locks = eternal_engine_database.resource_locks
     return resource_locks
 
@@ -165,7 +184,89 @@ def where_persist():
     }) or {}
     return persistor.get('value')
 
+def save_error_capture(ec: error_control.ExceptionCapture):
+    payload = ec.as_dict()
+    dsdEE().exceptions.insert_one(payload)
+
+class DebuggedSocket(discord.gateway.DiscordWebSocket):
+    def send_heartbeat(self, data: Any) -> Coroutine[Any, Any, None]:
+        print('\nDOES IT BEAT?\n')
+        memory_management.heartbeat()
+        return super().send_heartbeat(data)
+
 class CaptureClient(discord.Client):
+    async def connect(self, *, reconnect: bool = True) -> None:
+        _log = logging.getLogger('CaptureClient')
+        backoff = ExponentialBackoff()
+        ws_params: Dict[str, Any] = {
+            'initial': True,
+        }
+        while not self.is_closed():
+            try:
+                coro = DebuggedSocket.from_client(self, **ws_params)
+                self.ws = await asyncio.wait_for(coro, timeout=60.0)
+                ws_params['initial'] = False
+                while True:
+                    await self.ws.poll_event()
+            except ReconnectWebSocket as e:
+                _log.debug('Got a request to %s the websocket.', e.op)
+                self.dispatch('disconnect')
+                ws_params.update(sequence=self.ws.sequence, resume=e.resume, session=self.ws.session_id)
+                if e.resume:
+                    ws_params['gateway'] = self.ws.gateway
+                continue
+            except (
+                OSError,
+                HTTPException,
+                GatewayNotFound,
+                ConnectionClosed,
+                aiohttp.ClientError,
+                asyncio.TimeoutError,
+            ) as exc:
+                self.dispatch('disconnect')
+                if not reconnect:
+                    await self.close()
+                    if isinstance(exc, ConnectionClosed) and exc.code == 1000:
+                        # Clean close, don't re-raise this
+                        return
+                    raise
+
+                if self.is_closed():
+                    return
+
+                # If we get connection reset by peer then try to RESUME
+                if isinstance(exc, OSError) and exc.errno in (54, 10054):
+                    ws_params.update(
+                        sequence=self.ws.sequence,
+                        gateway=self.ws.gateway,
+                        initial=False,
+                        resume=True,
+                        session=self.ws.session_id,
+                    )
+                    continue
+
+                # We should only get this when an unhandled close code happens,
+                # such as a clean disconnect (1000) or a bad state (bad token, etc)
+                # Sometimes, Discord sends us 1000 for unknown reasons so we should
+                # reconnect regardless and rely on is_closed instead
+                if isinstance(exc, ConnectionClosed):
+                    if exc.code != 1000:
+                        await self.close()
+                        raise
+
+                retry = backoff.delay()
+                _log.exception("Attempting a reconnect in %.2fs", retry)
+                await asyncio.sleep(retry)
+                # Always try to RESUME the connection
+                # If the connection is not RESUME-able then the gateway will invalidate the session
+                # This is apparently what the official Discord client does
+                ws_params.update(
+                    sequence=self.ws.sequence,
+                    gateway=self.ws.gateway,
+                    resume=True,
+                    session=self.ws.session_id,
+                )
+
     def __init__(self, **options: Any) -> None:
         self.logger_actuator: LoggerActuator = LoggerActuator()
         super().__init__(**options)
@@ -194,8 +295,16 @@ class CaptureClient(discord.Client):
                 if (mirror_webhook == None or mirror_webhook == 'None'):
                     print(f'Ignoring message from deactivated webhook chan `{message.channel.name}`, `@{message.guild.name}`, `{message.content}`', )
                     return
-                await webhook.send_message(message, mirror_webhook, thread_id=mirror_thread)
-                pass
+                
+                try:
+                    if (mirror_thread is not None):
+                        await webhook.send_message(message, mirror_webhook, thread_id=mirror_thread)
+                    else:
+                        print(f'Invalid message mirror_thread {mirror_thread}, `{message.channel.name}`, `@{message.guild.name}`, `{message.content}`', )
+                except HTTPException as ex:
+                    capture = error_control.ExceptionCapture('CaptureClient.on_message;try_catch:webhook.send_message$HTTPException', ex)
+                    save_error_capture(capture)
+                    pass
 
             elif (MIRROR_MODE == 'CHANNEL'):
                 guild_category = self.logger_actuator.grab_guild_category({
