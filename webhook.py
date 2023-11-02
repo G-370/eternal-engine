@@ -17,6 +17,15 @@ def depingify(matched: re.Match):
     striped: str = matched.string[lr[0]:lr[1]]
     return f'`ping {striped}`'
 
+async def send_system_message(cnt, target_webhook):
+    async with aiohttp.ClientSession() as session:
+        hook = discord.Webhook.from_url(target_webhook, session=session)
+        payload = {
+            'content': cnt
+        }
+        await hook.send(**payload)
+
+
 async def send_message(msg: discord.Message, target_webhook, thread_id = None):
     async with aiohttp.ClientSession() as session:
         hook = discord.Webhook.from_url(target_webhook, session=session)

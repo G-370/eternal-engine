@@ -5,15 +5,20 @@ import gc
 import discord
 import tracemalloc
 import sys
+import asyncio
+from exceptions import *
 
 import collections
+from engine import LoggerActuator
 
 mems = []
 typecounts = collections.Counter()
 ONE_MEGABYTE = 1000000
 ONE_GIGABYTE = ONE_MEGABYTE * 1000
-MEMORY_LIMIT = 3 * ONE_GIGABYTE
+MEMORY_LIMIT = 300
 
+
+# If return True, then we kill the system
 def heartbeat():
     ps = psutil.Process(os.getpid())
     meminfo = ps.memory_full_info()
@@ -24,4 +29,11 @@ def heartbeat():
 
     if (rss / MEMORY_LIMIT >= 1.0):
         print("Memory pressure very high, closing off.")
+        async def notice():
+            await LoggerActuator().notice_periodic_system_shutdown()
+
+        loop = asyncio.get_event_loop()
+        coroutine = notice()
+        loop.run_until_complete(coroutine)
         sys.exit()
+        #raise HighMemoryUsage("Higher than 3 gigabytes of ram being used.")

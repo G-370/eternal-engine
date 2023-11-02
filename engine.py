@@ -11,6 +11,9 @@ import logging
 import error_control
 import memory_management
 import tracemalloc
+import os
+import sys
+from exceptions import *
 
 import traceback
 from gc import get_objects
@@ -28,6 +31,7 @@ db = pymongo.MongoClient(host='autosystem', port=27027)
 guilds_cache = list()
 
 MIRROR_MODE = 'FORUM'
+ENVIRON = os.environ.get('DSDENV') or None
 
 class CHANNEL_TYPES:
     GUILD_TEXT = 0
@@ -38,7 +42,10 @@ class CHANNEL_TYPES:
     GUILD_FORUM = 15
 
 def dsdEE():
-    return db['dsd-eternal-engine']
+    database = 'dsd-eternal-engine'
+    if (ENVIRON and len(ENVIRON) >= 1):
+        database += ENVIRON
+    return db[database]
 
 def slugify(txt: str):
     #regex = re.compile(r"(?![a-zA-Z]).", re.M)
@@ -93,16 +100,29 @@ def get_logger_key():
     key = setup_data_collection().find_one({"type": "log_actuator_key"})
     if (key):
         return key.get('value')
+    else:
+        raise NoLoggerAvailable("Error, no logger key has been setup.")
 
 def get_capture_key():
     key = setup_data_collection().find_one({"type": "capture_key"})
     if (key):
         return key.get('value')
+    else:
+        raise NoCaptureAvailable("Error, no capture key has been setup.")
 
 def get_guild_category(guild_id: int):
     guild_category_sd = setup_data_collection().find_one({"type": f"guild_category_{guild_id}"})
     if (guild_category_sd is not None):
         return guild_category_sd.get('value')
+    else:
+        raise NoCategoryAvailable("Categoryless")
+    
+def get_system_webhook():
+    key = setup_data_collection().find_one({"type": "system_webhook"})
+    if (key):
+        return key.get('value')
+    else:
+        raise NoSystemWebhook("Error, no system webhook has been setup.")
 
 def insert_guild_category_setup(guild_id: int, category_id: int):
     setup_data_collection().insert_one({
@@ -273,6 +293,7 @@ class CaptureClient(discord.Client):
 
     async def on_ready(self):
         print('Logged in with ', self.user.name)
+        await self.logger_actuator.notice_online_system()
 
     async def on_message(self, message: discord.Message):
         if (message.guild):
@@ -281,6 +302,7 @@ class CaptureClient(discord.Client):
                     'id': message.guild.id,
                     'name': message.guild.name
                 })
+
                 mirror_thread = self.logger_actuator.grab_mirrored_channel_forum_mode(guild_forum, {
                     'id': message.channel.id,
                     'name': message.channel.name,
@@ -378,11 +400,14 @@ class LoggerActuator():
 
     def create_guild_forum_rq(self, guild_id, name):
         url = self.api_baseline_url(f'guilds/{guild_id}/channels')
+
+        category = get_guild_category(guild_id)
+
         resp = self.do_rq(url, 'POST', {
             'json': {
                 'name': name,
                 'type': CHANNEL_TYPES.GUILD_FORUM,
-                'parent_id': 1158136849907326996,
+                'parent_id': int(category) or 1158136849907326996,
                 'nsfw': True
             }
         })
@@ -505,7 +530,74 @@ class LoggerActuator():
             webhook_url = webhook_resp.get('url')
             insert_channel_mirror_webhook_setup(channel_id, webhook_url)
         return webhook_url
+    
+    def send_message(self):
+        pass
+    
+    async def notice_online_system(self):
+        await webhook.send_system_message("Back online.", get_system_webhook())
+        pass
+    async def notice_periodic_system_shutdown(self):
+        await webhook.send_system_message("Restarting system...", get_system_webhook())
+        pass
+
+def setup_system():
+    try:
+        lkey = get_logger_key()
+        ckey = get_capture_key()
+        wpers = where_persist()
+        syswh = get_system_webhook()
+        if (wpers is None):
+            persistless = True
+            while persistless:
+                newkey = input("In which guild must the glorious bot throw any new servers? gib id> ")
+                if (newkey and len(newkey) > 8):
+                    setup_data_collection().insert_one({'type': 'target_guild_persistor', 'value': newkey})
+                    persistless = False
+                    wpers = newkey
+                else:
+                    print("INVALID")
+        cat = get_guild_category(int(wpers))
+        
+    except NoLoggerAvailable:
+        keyless = True
+        while keyless:
+            newkey = input("You must provide the system with a valid logger key> ")
+            if (newkey and len(newkey) > 8):
+                setup_data_collection().insert_one({"type": "log_actuator_key", "value": newkey})
+                keyless = False
+            else:
+                print("INVALID")
+    except NoCaptureAvailable:
+        keyless = True
+        while keyless:
+            newkey = input("You must provide the system with a valid capture key> ")
+            if (newkey and len(newkey) > 8):
+                setup_data_collection().insert_one({"type": "capture_key", "value": newkey})
+                keyless = False
+            else:
+                print("INVALID")
+    except NoCategoryAvailable:
+        keyless = True
+        while keyless:
+            newkey = input("You must provide the system with a valid category id within the given guild> ")
+            if (newkey and len(newkey) > 8):
+                setup_data_collection().insert_one({"type": f"guild_category_{wpers}", "value": newkey})
+                keyless = False
+            else:
+                print("INVALID")
+    except NoSystemWebhook:
+        keyless = True
+        while keyless:
+            newkey = input("You must provide the system with a webhook for status messages> ")
+            if (newkey and len(newkey) > 8):
+                setup_data_collection().insert_one({"type": f"system_webhook", "value": newkey})
+                keyless = False
+            else:
+                print("INVALID")
+
 
 if (__name__ == '__main__'):
+    setup_system()
     client = CaptureClient()
     client.run(get_capture_key())
