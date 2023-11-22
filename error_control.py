@@ -17,9 +17,9 @@ def accumulation_ping():
     # 237, 2, 2
     print('The counts for gc are: ', counts)
     ttt = str()
-    objstrs = [ obj for obj in gc.get_objects()]
-    print('\n The Objects inside of the GC are: ', objstrs, '\n')
-    GC_OBJ_STR.append(objstrs)
+    #objstrs = [ obj for obj in gc.get_objects()]
+    #print('\n The Objects inside of the GC are: ', objstrs, '\n')
+    #GC_OBJ_STR.append(objstrs)
     GC_COUNTS.append(counts)
     pass
     

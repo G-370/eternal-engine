@@ -15,7 +15,7 @@ mems = []
 typecounts = collections.Counter()
 ONE_MEGABYTE = 1000000
 ONE_GIGABYTE = ONE_MEGABYTE * 1000
-MEMORY_LIMIT = 300
+MEMORY_LIMIT = 2 * ONE_GIGABYTE
 
 
 # If return True, then we kill the system

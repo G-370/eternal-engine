@@ -4,6 +4,16 @@ import re
 import aiohttp
 import asyncio
 import requests
+import pymongo
+import datetime
+import logging
+from base64 import b64encode
+
+webhook_dbconn = pymongo.MongoClient(host='autosystem', port=27027)
+dsd_media = webhook_dbconn['ee-dsd-media']
+dsd_media_data = dsd_media['data']
+logger = logging.getLogger('eternal_engine.webhook')
+logger.setLevel(logging.DEBUG)
 
 USER_MENTION_PATTERN = re.compile('(\<@(\d*)\>)')
 SAMPLE = "Hello <@1158144160923140108> and also <@740408220325118004> and maybe <@<@<@<@740408220325118004>"
@@ -52,7 +62,39 @@ async def send_message(msg: discord.Message, target_webhook, thread_id = None):
         if (thread_id):
             thread = Thread(thread_id)
             res = await hook.send(**payload, files=files, thread=thread)
-            pass
+
+            if (len(embeds) > 0 or len(files) > 0):
+
+                for embed in embeds:
+                    embedi = embed.to_dict()
+                    dsd_media_data.insert_one({
+                        'persisted': False,
+                        'type': 'embed',
+                        'ts': datetime.datetime.now(),
+                        'd': embedi,
+                        'source_msg': str(msg.id),
+                        'source_author_id': str(msg.author.id),
+                        'source_author_username': str(msg.author.name)
+                    })
+                    logger.info("Added embed to dsd media")
+
+                for file in files:
+                    file.fp.seek(0)
+                    dsd_media_data.insert_one({
+                        'persisted': False,
+                        'type': 'attachment',
+                        'ts': datetime.datetime.now(),
+                        'd': {
+                            'filename': file.filename,
+                            'payload': b64encode(file.fp.read())
+                        },
+                        'source_msg': str(msg.id),
+                        'source_author_id': str(msg.author.id),
+                        'source_author_username': str(msg.author.name)
+                    })
+                    logger.info("Added attachment to dsd media")
+
+                pass
         else:
             await hook.send(**payload, files=files)
 

@@ -1,4 +1,5 @@
 from typing import Any, Coroutine
+from persist import DiscordEventHandler
 import discord
 import discord.gateway
 import pymongo
@@ -557,7 +558,7 @@ def setup_system():
                     wpers = newkey
                 else:
                     print("INVALID")
-        cat = get_guild_category(int(wpers))
+        #cat = get_guild_category(int(wpers))
         
     except NoLoggerAvailable:
         keyless = True
@@ -596,6 +597,10 @@ def setup_system():
             else:
                 print("INVALID")
 
+logger = logging.getLogger('discord.gateway')
+logger.propagate = False
+logger.setLevel(logging.DEBUG)
+logger.addHandler(DiscordEventHandler(level=logging.DEBUG))
 
 if (__name__ == '__main__'):
     setup_system()
