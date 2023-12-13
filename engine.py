@@ -305,7 +305,7 @@ class CaptureClient(discord.Client):
     async def on_message(self, message: discord.Message):
         if (message.guild):
             gid = message.guild.id
-            if (str(gid) in ignored_guilds):
+            if (str(gid) in ignored_guilds()):
                 print(f'Dropping forward of message in ignored @{message.guild.name}')
                 return
 
