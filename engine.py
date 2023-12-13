@@ -205,6 +205,12 @@ def where_persist():
     }) or {}
     return persistor.get('value')
 
+def ignored_guilds():
+    ignored = setup_data_collection().find_one({
+        'type': 'ignored_guilds'
+    }) or {}
+    return ignored.get('value', [])
+
 def save_error_capture(ec: error_control.ExceptionCapture):
     payload = ec.as_dict()
     dsdEE().exceptions.insert_one(payload)
@@ -298,6 +304,11 @@ class CaptureClient(discord.Client):
 
     async def on_message(self, message: discord.Message):
         if (message.guild):
+            gid = message.guild.id
+            if (str(gid) in ignored_guilds):
+                print(f'Dropping forward of message in ignored @{message.guild.name}')
+                return
+
             if (MIRROR_MODE == 'FORUM'):
                 guild_forum = self.logger_actuator.grab_guild_forum({
                     'id': message.guild.id,
